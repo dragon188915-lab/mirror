@@ -1,0 +1,63 @@
+# Build Eden for Android on GitHub's servers.
+# Put this file in your fork at: .github/workflows/android.yml
+# Then: Actions tab -> "Build Eden Android" -> Run workflow.
+name: Build Eden Android
+
+on:
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: "Flavor: standard (Android 13+) | legacy | optimized"
+        default: standard
+      build_type:
+        description: "RelWithDebInfo installs next to your current Eden; Release replaces it"
+        default: RelWithDebInfo
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    env:
+      CCACHE: "true"
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache glslang-tools
+
+      - name: Install Android SDK components (versions from Eden's build.gradle.kts)
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-36" "ndk;30.0.16248370" "cmake;3.31.6"
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ inputs.flavor }}-${{ inputs.build_type }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ inputs.flavor }}-${{ inputs.build_type }}-
+
+      - name: Build
+        run: |
+          ccache --max-size=3G
+          chmod +x .ci/android/build.sh
+          ./.ci/android/build.sh -t "${{ inputs.flavor }}" -b "${{ inputs.build_type }}"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: eden-android-${{ inputs.flavor }}-${{ inputs.build_type }}
+          path: artifacts/*
+          if-no-files-found: error
